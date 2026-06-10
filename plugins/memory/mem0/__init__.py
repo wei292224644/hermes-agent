@@ -47,17 +47,22 @@ def _load_config() -> dict:
     from hermes_constants import get_hermes_home
 
     config = {
+        "mode": os.environ.get("MEM0_MODE", "cloud"),
         "api_key": os.environ.get("MEM0_API_KEY", ""),
         "user_id": os.environ.get("MEM0_USER_ID", "hermes-user"),
         "agent_id": os.environ.get("MEM0_AGENT_ID", "hermes"),
         "rerank": True,
-        "keyword_search": False,
     }
 
     config_path = get_hermes_home() / "mem0.json"
     if config_path.exists():
         try:
             file_cfg = json.loads(config_path.read_text(encoding="utf-8"))
+
+            # Backward compatibility: if no mode and no local config, default to cloud
+            if "mode" not in file_cfg and "local" not in file_cfg:
+                file_cfg["mode"] = "cloud"
+
             config.update({k: v for k, v in file_cfg.items()
                            if v is not None and v != ""})
         except Exception:
