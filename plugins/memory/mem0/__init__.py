@@ -201,7 +201,17 @@ class Mem0MemoryProvider(MemoryProvider):
 
     def get_config_schema(self):
         return [
-            {"key": "api_key", "description": "Mem0 Platform API key", "secret": True, "required": True, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai"},
+            {"key": "mode", "description": "Connection mode", "default": "cloud", "choices": ["cloud", "local"]},
+            # Cloud mode
+            {"key": "api_key", "description": "Mem0 Platform API key", "secret": True, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai", "when": {"mode": "cloud"}},
+            # Local mode
+            {"key": "llm_provider", "description": "LLM provider (use 'hermes' to reuse hermes config)", "default": "hermes", "when": {"mode": "local"}},
+            {"key": "embedding_provider", "description": "Embedding provider", "default": "ollama", "choices": ["ollama", "openai"], "when": {"mode": "local"}},
+            {"key": "embedding_model", "description": "Embedding model", "default": "qwen3-embedding:4b", "when": {"mode": "local"}},
+            {"key": "embedding_base_url", "description": "Ollama base URL", "default": "http://localhost:11434", "when": {"mode": "local", "embedding_provider": "ollama"}},
+            {"key": "vector_store_provider", "description": "Vector store provider", "default": "qdrant", "choices": ["qdrant", "chroma", "faiss"], "when": {"mode": "local"}},
+            {"key": "vector_store_path", "description": "Vector store path", "default": "~/.hermes/qdrant", "when": {"mode": "local"}},
+            # Common
             {"key": "user_id", "description": "User identifier", "default": "hermes-user"},
             {"key": "agent_id", "description": "Agent identifier", "default": "hermes"},
             {"key": "rerank", "description": "Enable reranking for recall", "default": "true", "choices": ["true", "false"]},
@@ -254,14 +264,97 @@ class Mem0MemoryProvider(MemoryProvider):
             "config": llm_cfg.get("config", {})
         }
 
+    def _get_embedding_config(self, local_cfg: dict) -> dict:
+        """Get embedding config for mem0 local mode."""
+        embedding_cfg = local_cfg.get("embedding", {})
+
+        provider = embedding_cfg.get("provider", "ollama")
+
+        if provider == "ollama":
+            return {
+                "provider": "ollama",
+                "config": {
+                    "model": embedding_cfg.get("model", "qwen3-embedding:4b"),
+                    "base_url": embedding_cfg.get("base_url", "http://localhost:11434"),
+                },
+            }
+        elif provider == "openai":
+            return {
+                "provider": "openai",
+                "config": {
+                    "model": embedding_cfg.get("model", "text-embedding-3-small"),
+                    "api_key": embedding_cfg.get("api_key", ""),
+                },
+            }
+        else:
+            return {
+                "provider": provider,
+                "config": embedding_cfg.get("config", {}),
+            }
+
+    def _get_vector_store_config(self, local_cfg: dict) -> dict:
+        """Get vector store config for mem0 local mode."""
+        vs_cfg = local_cfg.get("vector_store", {})
+
+        provider = vs_cfg.get("provider", "qdrant")
+
+        if provider == "qdrant":
+            return {
+                "provider": "qdrant",
+                "config": {
+                    "path": vs_cfg.get("path", "~/.hermes/qdrant"),
+                    "collection_name": vs_cfg.get("collection_name", "mem0"),
+                },
+            }
+        elif provider == "chroma":
+            return {
+                "provider": "chroma",
+                "config": {
+                    "path": vs_cfg.get("path", "~/.hermes/chroma"),
+                    "collection_name": vs_cfg.get("collection_name", "mem0"),
+                },
+            }
+        elif provider == "faiss":
+            return {
+                "provider": "faiss",
+                "config": {
+                    "path": vs_cfg.get("path", "~/.hermes/faiss"),
+                },
+            }
+        else:
+            return {
+                "provider": provider,
+                "config": vs_cfg.get("config", {}),
+            }
+
+    def _build_local_config(self) -> dict:
+        """Build mem0 config for local mode."""
+        local_cfg = self._config.get("local", {})
+
+        llm_config = self._get_llm_config(local_cfg)
+        embedding_config = self._get_embedding_config(local_cfg)
+        vector_store_config = self._get_vector_store_config(local_cfg)
+
+        return {
+            "llm": llm_config,
+            "embedder": embedding_config,
+            "vector_store": vector_store_config,
+        }
+
     def _get_client(self):
         """Thread-safe client accessor with lazy initialization."""
         with self._client_lock:
             if self._client is not None:
                 return self._client
+
             try:
-                from mem0 import MemoryClient
-                self._client = MemoryClient(api_key=self._api_key)
+                if self._mode == "local":
+                    from mem0 import Memory
+                    config = self._build_local_config()
+                    self._client = Memory.from_config(config)
+                else:
+                    from mem0 import MemoryClient
+                    self._client = MemoryClient(api_key=self._api_key)
                 return self._client
             except ImportError:
                 raise RuntimeError("mem0 package not installed. Run: pip install mem0ai")
@@ -291,6 +384,7 @@ class Mem0MemoryProvider(MemoryProvider):
 
     def initialize(self, session_id: str, **kwargs) -> None:
         self._config = _load_config()
+        self._mode = self._config.get("mode", "cloud")
         self._api_key = self._config.get("api_key", "")
         # Prefer gateway-provided user_id for per-user memory scoping;
         # fall back to config/env default for CLI (single-user) sessions.
