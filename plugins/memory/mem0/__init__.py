@@ -29,7 +29,6 @@ import time
 from typing import Any, Dict, List
 
 from agent.memory_provider import MemoryProvider
-from hermes_cli.config import cfg_get
 from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
@@ -228,10 +227,16 @@ class Mem0MemoryProvider(MemoryProvider):
 
     def _get_hermes_llm_config(self) -> dict:
         """Get LLM config from hermes configuration (read-only)."""
-        provider = cfg_get("provider", "openai")
-        api_key = cfg_get("api_key", "")
-        base_url = cfg_get("base_url", "")
-        model = cfg_get("model", "")
+        from hermes_cli.config import load_config as _load_hermes_cfg
+        try:
+            _cfg = _load_hermes_cfg()
+        except Exception:
+            _cfg = {}
+        model_cfg = _cfg.get("model", {}) if isinstance(_cfg.get("model"), dict) else {}
+        provider = model_cfg.get("provider", "openai")
+        api_key = model_cfg.get("api_key", "")
+        base_url = model_cfg.get("base_url", "")
+        model = model_cfg.get("default", "")
 
         mem0_provider = self._map_hermes_provider_to_mem0(provider)
 
@@ -281,6 +286,25 @@ class Mem0MemoryProvider(MemoryProvider):
             "config": llm_cfg.get("config", {})
         }
 
+    def _get_embedding_dims(self, local_cfg: dict) -> int:
+        """Return the vector dimension for the configured embedding model."""
+        embedding_cfg = local_cfg.get("embedding", {})
+        provider = embedding_cfg.get("provider", "ollama")
+        model = embedding_cfg.get("model", "")
+        # Known model dimensions
+        known_dims = {
+            "qwen3-embedding:4b": 2560,
+            "nomic-embed-text": 768,
+            "nomic-embed-text:latest": 768,
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+        }
+        if model in known_dims:
+            return known_dims[model]
+        # Default: try to get from config, fallback to 1536
+        return embedding_cfg.get("dims", 1536)
+
     def _get_embedding_config(self, local_cfg: dict) -> dict:
         """Get embedding config for mem0 local mode."""
         embedding_cfg = local_cfg.get("embedding", {})
@@ -314,6 +338,7 @@ class Mem0MemoryProvider(MemoryProvider):
         vs_cfg = local_cfg.get("vector_store", {})
 
         provider = vs_cfg.get("provider", "qdrant")
+        embedding_dims = self._get_embedding_dims(local_cfg)
 
         if provider == "qdrant":
             return {
@@ -321,6 +346,7 @@ class Mem0MemoryProvider(MemoryProvider):
                 "config": {
                     "path": vs_cfg.get("path", "~/.hermes/qdrant"),
                     "collection_name": vs_cfg.get("collection_name", "mem0"),
+                    "embedding_model_dims": embedding_dims,
                 },
             }
         elif provider == "chroma":
