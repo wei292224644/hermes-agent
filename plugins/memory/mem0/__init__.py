@@ -171,8 +171,17 @@ class Mem0MemoryProvider(MemoryProvider):
         return "mem0"
 
     def is_available(self) -> bool:
-        cfg = _load_config()
-        return bool(cfg.get("api_key"))
+        try:
+            cfg = _load_config()
+            mode = cfg.get("mode", "cloud")
+
+            if mode == "local":
+                available, _ = _check_local_runtime()
+                return available
+            else:
+                return bool(cfg.get("api_key"))
+        except Exception:
+            return False
 
     def save_config(self, values, hermes_home):
         """Write config to $HERMES_HOME/mem0.json."""

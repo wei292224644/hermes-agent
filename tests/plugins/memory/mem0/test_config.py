@@ -134,3 +134,57 @@ def test_check_local_runtime_unavailable():
 
         assert available is False
         assert "No module" in reason
+
+
+def test_is_available_cloud_mode_with_key():
+    """Test is_available returns True for cloud mode with API key."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    with patch("plugins.memory.mem0._load_config", return_value={
+        "mode": "cloud",
+        "api_key": "test-key",
+    }):
+        assert provider.is_available() is True
+
+
+def test_is_available_cloud_mode_without_key():
+    """Test is_available returns False for cloud mode without API key."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    with patch("plugins.memory.mem0._load_config", return_value={
+        "mode": "cloud",
+        "api_key": "",
+    }):
+        assert provider.is_available() is False
+
+
+def test_is_available_local_mode_available():
+    """Test is_available returns True for local mode when runtime available."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    with patch("plugins.memory.mem0._load_config", return_value={
+        "mode": "local",
+        "local": {"embedding": {"model": "test-model"}},
+    }):
+        with patch("plugins.memory.mem0._check_local_runtime", return_value=(True, None)):
+            assert provider.is_available() is True
+
+
+def test_is_available_local_mode_unavailable():
+    """Test is_available returns False for local mode when runtime unavailable."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    with patch("plugins.memory.mem0._load_config", return_value={
+        "mode": "local",
+        "local": {"embedding": {"model": "test-model"}},
+    }):
+        with patch("plugins.memory.mem0._check_local_runtime", return_value=(False, "error")):
+            assert provider.is_available() is False
