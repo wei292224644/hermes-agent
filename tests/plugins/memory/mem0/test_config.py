@@ -111,3 +111,26 @@ def test_load_config_local_key_without_mode():
                 # env default is "cloud", and file_cfg has no "mode" key, so mode stays as env default
                 assert config["mode"] == "cloud"
                 assert config["local"]["embedding"]["model"] == "test-model"
+
+
+def test_check_local_runtime_available():
+    """Test _check_local_runtime when mem0 is installed."""
+    from plugins.memory.mem0 import _check_local_runtime
+
+    # Mock successful import
+    with patch("importlib.import_module", return_value=None):
+        available, reason = _check_local_runtime()
+
+        assert available is True
+        assert reason is None
+
+
+def test_check_local_runtime_unavailable():
+    """Test _check_local_runtime when mem0 is not installed."""
+    from plugins.memory.mem0 import _check_local_runtime
+
+    with patch("importlib.import_module", side_effect=ImportError("No module")):
+        available, reason = _check_local_runtime()
+
+        assert available is False
+        assert "No module" in reason
