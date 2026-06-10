@@ -29,6 +29,7 @@ import time
 from typing import Any, Dict, List
 
 from agent.memory_provider import MemoryProvider
+from hermes_cli.config import cfg_get
 from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,53 @@ class Mem0MemoryProvider(MemoryProvider):
             {"key": "agent_id", "description": "Agent identifier", "default": "hermes"},
             {"key": "rerank", "description": "Enable reranking for recall", "default": "true", "choices": ["true", "false"]},
         ]
+
+    def _get_llm_config(self, local_cfg: dict) -> dict:
+        """Get LLM config for mem0 local mode."""
+        llm_provider = local_cfg.get("llm_provider", "hermes")
+
+        if llm_provider == "hermes" and "llm" not in local_cfg:
+            return self._get_hermes_llm_config()
+        else:
+            return self._get_custom_llm_config(local_cfg)
+
+    def _get_hermes_llm_config(self) -> dict:
+        """Get LLM config from hermes configuration (read-only)."""
+        provider = cfg_get("provider", "openai")
+        api_key = cfg_get("api_key", "")
+        base_url = cfg_get("base_url", "")
+        model = cfg_get("model", "")
+
+        mem0_provider = self._map_hermes_provider_to_mem0(provider)
+
+        return {
+            "provider": mem0_provider,
+            "config": {
+                "api_key": api_key,
+                "base_url": base_url,
+                "model": model
+            }
+        }
+
+    def _map_hermes_provider_to_mem0(self, hermes_provider: str) -> str:
+        """Map hermes provider name to mem0 provider name."""
+        provider_map = {
+            "openai": "openai",
+            "anthropic": "anthropic",
+            "ollama": "ollama",
+            "openrouter": "openai",
+            "deepseek": "openai",
+        }
+        return provider_map.get(hermes_provider, "openai")
+
+    def _get_custom_llm_config(self, local_cfg: dict) -> dict:
+        """Get custom LLM config from mem0 configuration."""
+        llm_cfg = local_cfg.get("llm", {})
+
+        return {
+            "provider": llm_cfg.get("provider", "openai"),
+            "config": llm_cfg.get("config", {})
+        }
 
     def _get_client(self):
         """Thread-safe client accessor with lazy initialization."""

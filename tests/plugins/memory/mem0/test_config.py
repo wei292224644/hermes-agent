@@ -188,3 +188,70 @@ def test_is_available_local_mode_unavailable():
     }):
         with patch("plugins.memory.mem0._check_local_runtime", return_value=(False, "error")):
             assert provider.is_available() is False
+
+
+def test_get_hermes_llm_config():
+    """Test _get_hermes_llm_config reads from hermes config."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    with patch("plugins.memory.mem0.cfg_get") as mock_cfg_get:
+        mock_cfg_get.side_effect = lambda key, default=None: {
+            "provider": "openai",
+            "api_key": "test-key",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4",
+        }.get(key, default)
+
+        config = provider._get_hermes_llm_config()
+
+        assert config["provider"] == "openai"
+        assert config["config"]["api_key"] == "test-key"
+        assert config["config"]["base_url"] == "https://api.openai.com/v1"
+        assert config["config"]["model"] == "gpt-4"
+
+
+def test_map_hermes_provider_to_mem0():
+    """Test _map_hermes_provider_to_mem0 maps correctly."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    assert provider._map_hermes_provider_to_mem0("openai") == "openai"
+    assert provider._map_hermes_provider_to_mem0("anthropic") == "anthropic"
+    assert provider._map_hermes_provider_to_mem0("ollama") == "ollama"
+    assert provider._map_hermes_provider_to_mem0("openrouter") == "openai"
+    assert provider._map_hermes_provider_to_mem0("deepseek") == "openai"
+    assert provider._map_hermes_provider_to_mem0("unknown") == "openai"
+
+
+def test_get_llm_config_hermes():
+    """Test _get_llm_config with hermes provider."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    with patch.object(provider, "_get_hermes_llm_config", return_value={"provider": "openai", "config": {}}):
+        config = provider._get_llm_config({"llm_provider": "hermes"})
+
+        assert config["provider"] == "openai"
+
+
+def test_get_llm_config_custom():
+    """Test _get_llm_config with custom provider."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+
+    provider = Mem0MemoryProvider()
+
+    local_cfg = {
+        "llm": {
+            "provider": "ollama",
+            "config": {"model": "llama3"},
+        }
+    }
+
+    config = provider._get_llm_config(local_cfg)
+
+    assert config["provider"] == "ollama"
+    assert config["config"]["model"] == "llama3"
