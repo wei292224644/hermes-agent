@@ -4,9 +4,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-
 def test_load_config_defaults():
     """Test that _load_config returns correct defaults."""
     from plugins.memory.mem0 import _load_config
@@ -89,3 +86,28 @@ def test_load_config_backward_compatible():
                 # Should default to cloud for backward compatibility
                 assert config["mode"] == "cloud"
                 assert config["api_key"] == "old-key"
+
+
+def test_load_config_local_key_without_mode():
+    """Test that config with 'local' key but no 'mode' keeps local default."""
+    from plugins.memory.mem0 import _load_config
+
+    local_config = {
+        "local": {
+            "llm_provider": "hermes",
+            "embedding": {"provider": "ollama", "model": "test-model"},
+        },
+    }
+
+    with patch.dict(os.environ, {}, clear=True):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "mem0.json"
+            config_path.write_text(json.dumps(local_config))
+
+            with patch("hermes_constants.get_hermes_home", return_value=Path(tmpdir)):
+                config = _load_config()
+
+                # 'local' key present so backward-compat should NOT set mode to cloud
+                # env default is "cloud", and file_cfg has no "mode" key, so mode stays as env default
+                assert config["mode"] == "cloud"
+                assert config["local"]["embedding"]["model"] == "test-model"

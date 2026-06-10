@@ -6,11 +6,16 @@ automatic deduplication via the Mem0 Platform API.
 Original PR #2933 by kartik-mem0, adapted to MemoryProvider ABC.
 
 Config via environment variables:
-  MEM0_API_KEY       — Mem0 Platform API key (required)
+  MEM0_MODE          — Backend mode: "cloud" (default) or "local"
+  MEM0_API_KEY       — Mem0 Platform API key (required for cloud mode)
   MEM0_USER_ID       — User identifier (default: hermes-user)
   MEM0_AGENT_ID      — Agent identifier (default: hermes)
 
 Or via $HERMES_HOME/mem0.json.
+
+Backward compatibility: if mem0.json exists but contains neither a ``mode``
+nor a ``local`` key, ``mode`` defaults to ``"cloud"`` so that existing
+config files continue to work after the mode upgrade.
 """
 
 from __future__ import annotations
@@ -43,6 +48,11 @@ def _load_config() -> dict:
     Environment variables provide defaults; mem0.json (if present) overrides
     individual keys.  This avoids a silent failure when the JSON file exists
     but is missing fields like ``api_key`` that the user set in ``.env``.
+
+    ``MEM0_MODE`` selects the backend: ``"cloud"`` (default) or ``"local"``.
+    When loading from mem0.json, backward compatibility is applied: if the
+    file contains neither ``mode`` nor ``local``, ``mode`` is set to
+    ``"cloud"`` so that legacy configs keep working unchanged.
     """
     from hermes_constants import get_hermes_home
 
