@@ -235,14 +235,31 @@ class Mem0MemoryProvider(MemoryProvider):
 
         mem0_provider = self._map_hermes_provider_to_mem0(provider)
 
+        # mem0ai 2.x uses provider-specific base_url field names
+        base_url_field = self._get_base_url_field(mem0_provider)
+
+        llm_config = {
+            "api_key": api_key,
+            "model": model,
+        }
+        if base_url:
+            llm_config[base_url_field] = base_url
+
         return {
             "provider": mem0_provider,
-            "config": {
-                "api_key": api_key,
-                "base_url": base_url,
-                "model": model
-            }
+            "config": llm_config,
         }
+
+    def _get_base_url_field(self, mem0_provider: str) -> str:
+        """Return the provider-specific base_url field name for mem0ai 2.x."""
+        field_map = {
+            "openai": "openai_base_url",
+            "openrouter": "openrouter_base_url",
+            "ollama": "ollama_base_url",
+            "anthropic": "anthropic_base_url",
+            "deepseek": "deepseek_base_url",
+        }
+        return field_map.get(mem0_provider, "openai_base_url")
 
     def _map_hermes_provider_to_mem0(self, hermes_provider: str) -> str:
         """Map hermes provider name to mem0 provider name."""
@@ -275,7 +292,7 @@ class Mem0MemoryProvider(MemoryProvider):
                 "provider": "ollama",
                 "config": {
                     "model": embedding_cfg.get("model", "qwen3-embedding:4b"),
-                    "base_url": embedding_cfg.get("base_url", "http://localhost:11434"),
+                    "ollama_base_url": embedding_cfg.get("ollama_base_url", "http://localhost:11434"),
                 },
             }
         elif provider == "openai":

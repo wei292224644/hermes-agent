@@ -38,7 +38,7 @@ cat > ~/.hermes/mem0.json << EOF
     "embedding": {
       "provider": "ollama",
       "model": "qwen3-embedding:4b",
-      "base_url": "http://localhost:11434"
+      "ollama_base_url": "http://localhost:11434"
     },
     "vector_store": {
       "provider": "qdrant",

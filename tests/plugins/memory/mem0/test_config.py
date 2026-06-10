@@ -208,7 +208,7 @@ def test_get_hermes_llm_config():
 
         assert config["provider"] == "openai"
         assert config["config"]["api_key"] == "test-key"
-        assert config["config"]["base_url"] == "https://api.openai.com/v1"
+        assert config["config"]["openai_base_url"] == "https://api.openai.com/v1"
         assert config["config"]["model"] == "gpt-4"
 
 
@@ -271,7 +271,7 @@ def test_get_embedding_config_default():
 
     assert config["provider"] == "ollama"
     assert config["config"]["model"] == "qwen3-embedding:4b"
-    assert config["config"]["base_url"] == "http://localhost:11434"
+    assert config["config"]["ollama_base_url"] == "http://localhost:11434"
 
 
 def test_get_embedding_config_custom():
