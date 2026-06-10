@@ -20,6 +20,7 @@ config files continue to work after the mode upgrade.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
@@ -79,6 +80,21 @@ def _load_config() -> dict:
             pass
 
     return config
+
+
+def _check_local_runtime() -> tuple[bool, str | None]:
+    """Return whether local mem0 imports cleanly.
+
+    On older CPUs, importing the local mem0 stack can raise a runtime
+    error from NumPy before the client starts. Treat that as "unavailable"
+    so Hermes can degrade gracefully instead of repeatedly trying to start
+    a broken local memory backend.
+    """
+    try:
+        importlib.import_module("mem0")
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
 
 
 # ---------------------------------------------------------------------------
