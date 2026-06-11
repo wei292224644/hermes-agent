@@ -33,18 +33,12 @@ hermes config set memory.provider mem0
 cat > ~/.hermes/mem0.json << EOF
 {
   "mode": "local",
-  "local": {
-    "llm_provider": "hermes",
-    "embedding": {
-      "provider": "ollama",
-      "model": "qwen3-embedding:4b",
-      "ollama_base_url": "http://localhost:11434"
-    },
-    "vector_store": {
-      "provider": "qdrant",
-      "path": "~/.hermes/qdrant"
-    }
-  }
+  "llm_provider": "hermes",
+  "embedding_provider": "ollama",
+  "embedding_model": "qwen3-embedding:4b",
+  "embedding_base_url": "http://localhost:11434",
+  "vector_store_provider": "qdrant",
+  "vector_store_path": "~/.hermes/qdrant"
 }
 EOF
 ```
@@ -70,12 +64,12 @@ Config file: `$HERMES_HOME/mem0.json`
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `local.llm_provider` | `hermes` | LLM provider (use `hermes` to reuse hermes config) |
-| `local.embedding.provider` | `ollama` | Embedding provider |
-| `local.embedding.model` | `qwen3-embedding:4b` | Embedding model |
-| `local.embedding.base_url` | `http://localhost:11434` | Ollama base URL |
-| `local.vector_store.provider` | `qdrant` | Vector store provider |
-| `local.vector_store.path` | `~/.hermes/qdrant` | Vector store path |
+| `llm_provider` | `hermes` | LLM provider (use `hermes` to reuse hermes config) |
+| `embedding_provider` | `ollama` | Embedding provider |
+| `embedding_model` | `qwen3-embedding:4b` | Embedding model |
+| `embedding_base_url` | `http://localhost:11434` | Ollama base URL |
+| `vector_store_provider` | `qdrant` | Vector store provider |
+| `vector_store_path` | `~/.hermes/qdrant` | Vector store path |
 
 ## Tools
 

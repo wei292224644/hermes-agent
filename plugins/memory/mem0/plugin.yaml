@@ -3,3 +3,6 @@ version: 2.0.0
 description: "Mem0 — server-side LLM fact extraction with semantic search, reranking, and automatic deduplication. Supports cloud and local modes."
 pip_dependencies:
   - mem0ai
+  # Local mode default backend (MEM0_MODE=local with the ollama embedder/LLM).
+  # mem0ai does not pull this in and otherwise prompts to install it at runtime.
+  - ollama

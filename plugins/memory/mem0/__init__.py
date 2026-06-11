@@ -216,14 +216,12 @@ class Mem0MemoryProvider(MemoryProvider):
             {"key": "rerank", "description": "Enable reranking for recall", "default": "true", "choices": ["true", "false"]},
         ]
 
-    def _get_llm_config(self, local_cfg: dict) -> dict:
-        """Get LLM config for mem0 local mode."""
-        llm_provider = local_cfg.get("llm_provider", "hermes")
-
-        if llm_provider == "hermes" and "llm" not in local_cfg:
+    def _get_llm_config(self, cfg: dict) -> dict:
+        """Get LLM config for mem0 local mode (reads flat config keys)."""
+        llm_provider = cfg.get("llm_provider", "hermes")
+        if llm_provider == "hermes":
             return self._get_hermes_llm_config()
-        else:
-            return self._get_custom_llm_config(local_cfg)
+        return self._get_custom_llm_config(cfg)
 
     def _get_hermes_llm_config(self) -> dict:
         """Get LLM config from hermes configuration (read-only)."""
@@ -277,20 +275,31 @@ class Mem0MemoryProvider(MemoryProvider):
         }
         return provider_map.get(hermes_provider, "openai")
 
-    def _get_custom_llm_config(self, local_cfg: dict) -> dict:
-        """Get custom LLM config from mem0 configuration."""
-        llm_cfg = local_cfg.get("llm", {})
+    def _get_custom_llm_config(self, cfg: dict) -> dict:
+        """Build a custom LLM config from flat ``llm_*`` keys."""
+        provider = cfg.get("llm_provider", "openai")
+        llm_config: dict = {}
+        if cfg.get("llm_model"):
+            llm_config["model"] = cfg["llm_model"]
+        if cfg.get("llm_api_key"):
+            llm_config["api_key"] = cfg["llm_api_key"]
+        if cfg.get("llm_base_url"):
+            llm_config[self._get_base_url_field(provider)] = cfg["llm_base_url"]
+        return {"provider": provider, "config": llm_config}
 
-        return {
-            "provider": llm_cfg.get("provider", "openai"),
-            "config": llm_cfg.get("config", {})
-        }
+    def _embedding_default_model(self, cfg: dict) -> str:
+        """Resolve the effective embedding model, applying the provider default.
 
-    def _get_embedding_dims(self, local_cfg: dict) -> int:
+        Shared by the embedder config and the dimension lookup so the vector
+        store is always told the dimension that matches the model actually used.
+        """
+        provider = cfg.get("embedding_provider", "ollama")
+        default = "qwen3-embedding:4b" if provider == "ollama" else "text-embedding-3-small"
+        return cfg.get("embedding_model") or default
+
+    def _get_embedding_dims(self, cfg: dict) -> int:
         """Return the vector dimension for the configured embedding model."""
-        embedding_cfg = local_cfg.get("embedding", {})
-        provider = embedding_cfg.get("provider", "ollama")
-        model = embedding_cfg.get("model", "")
+        model = self._embedding_default_model(cfg)
         # Known model dimensions
         known_dims = {
             "qwen3-embedding:4b": 2560,
@@ -303,49 +312,44 @@ class Mem0MemoryProvider(MemoryProvider):
         if model in known_dims:
             return known_dims[model]
         # Default: try to get from config, fallback to 1536
-        return embedding_cfg.get("dims", 1536)
+        return cfg.get("embedding_dims", 1536)
 
-    def _get_embedding_config(self, local_cfg: dict) -> dict:
-        """Get embedding config for mem0 local mode."""
-        embedding_cfg = local_cfg.get("embedding", {})
-
-        provider = embedding_cfg.get("provider", "ollama")
+    def _get_embedding_config(self, cfg: dict) -> dict:
+        """Get embedding config for mem0 local mode (reads flat config keys)."""
+        provider = cfg.get("embedding_provider", "ollama")
+        model = self._embedding_default_model(cfg)
 
         if provider == "ollama":
             return {
                 "provider": "ollama",
                 "config": {
-                    "model": embedding_cfg.get("model", "qwen3-embedding:4b"),
-                    "ollama_base_url": embedding_cfg.get("ollama_base_url", "http://localhost:11434"),
+                    "model": model,
+                    "ollama_base_url": cfg.get("embedding_base_url", "http://localhost:11434"),
                 },
             }
         elif provider == "openai":
             return {
                 "provider": "openai",
                 "config": {
-                    "model": embedding_cfg.get("model", "text-embedding-3-small"),
-                    "api_key": embedding_cfg.get("api_key", ""),
+                    "model": model,
+                    "api_key": cfg.get("embedding_api_key", ""),
                 },
             }
         else:
-            return {
-                "provider": provider,
-                "config": embedding_cfg.get("config", {}),
-            }
+            return {"provider": provider, "config": {}}
 
-    def _get_vector_store_config(self, local_cfg: dict) -> dict:
-        """Get vector store config for mem0 local mode."""
-        vs_cfg = local_cfg.get("vector_store", {})
-
-        provider = vs_cfg.get("provider", "qdrant")
-        embedding_dims = self._get_embedding_dims(local_cfg)
+    def _get_vector_store_config(self, cfg: dict) -> dict:
+        """Get vector store config for mem0 local mode (reads flat config keys)."""
+        provider = cfg.get("vector_store_provider", "qdrant")
+        embedding_dims = self._get_embedding_dims(cfg)
+        collection = cfg.get("vector_store_collection", "mem0")
 
         if provider == "qdrant":
             return {
                 "provider": "qdrant",
                 "config": {
-                    "path": vs_cfg.get("path", "~/.hermes/qdrant"),
-                    "collection_name": vs_cfg.get("collection_name", "mem0"),
+                    "path": cfg.get("vector_store_path", "~/.hermes/qdrant"),
+                    "collection_name": collection,
                     "embedding_model_dims": embedding_dims,
                 },
             }
@@ -353,35 +357,34 @@ class Mem0MemoryProvider(MemoryProvider):
             return {
                 "provider": "chroma",
                 "config": {
-                    "path": vs_cfg.get("path", "~/.hermes/chroma"),
-                    "collection_name": vs_cfg.get("collection_name", "mem0"),
+                    "path": cfg.get("vector_store_path", "~/.hermes/chroma"),
+                    "collection_name": collection,
                 },
             }
         elif provider == "faiss":
             return {
                 "provider": "faiss",
                 "config": {
-                    "path": vs_cfg.get("path", "~/.hermes/faiss"),
+                    "path": cfg.get("vector_store_path", "~/.hermes/faiss"),
                 },
             }
         else:
-            return {
-                "provider": provider,
-                "config": vs_cfg.get("config", {}),
-            }
+            return {"provider": provider, "config": {}}
 
     def _build_local_config(self) -> dict:
-        """Build mem0 config for local mode."""
-        local_cfg = self._config.get("local", {})
+        """Build mem0 config for local mode from flat config keys.
 
-        llm_config = self._get_llm_config(local_cfg)
-        embedding_config = self._get_embedding_config(local_cfg)
-        vector_store_config = self._get_vector_store_config(local_cfg)
+        The setup wizard stores local-mode settings as flat top-level keys
+        (``embedding_provider``, ``embedding_model``, ``vector_store_path`` …)
+        via ``save_config``, so the builders read them straight off
+        ``self._config`` — not from a nested ``local`` block.
+        """
+        cfg = self._config
 
         return {
-            "llm": llm_config,
-            "embedder": embedding_config,
-            "vector_store": vector_store_config,
+            "llm": self._get_llm_config(cfg),
+            "embedder": self._get_embedding_config(cfg),
+            "vector_store": self._get_vector_store_config(cfg),
         }
 
     def _get_client(self):

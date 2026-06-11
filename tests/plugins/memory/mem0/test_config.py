@@ -196,14 +196,15 @@ def test_get_hermes_llm_config():
 
     provider = Mem0MemoryProvider()
 
-    with patch("plugins.memory.mem0.cfg_get") as mock_cfg_get:
-        mock_cfg_get.side_effect = lambda key, default=None: {
+    hermes_cfg = {
+        "model": {
             "provider": "openai",
             "api_key": "test-key",
             "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4",
-        }.get(key, default)
-
+            "default": "gpt-4",
+        }
+    }
+    with patch("hermes_cli.config.load_config", return_value=hermes_cfg):
         config = provider._get_hermes_llm_config()
 
         assert config["provider"] == "openai"
@@ -244,14 +245,12 @@ def test_get_llm_config_custom():
 
     provider = Mem0MemoryProvider()
 
-    local_cfg = {
-        "llm": {
-            "provider": "ollama",
-            "config": {"model": "llama3"},
-        }
+    flat_cfg = {
+        "llm_provider": "ollama",
+        "llm_model": "llama3",
     }
 
-    config = provider._get_llm_config(local_cfg)
+    config = provider._get_llm_config(flat_cfg)
 
     assert config["provider"] == "ollama"
     assert config["config"]["model"] == "llama3"
@@ -280,18 +279,17 @@ def test_get_embedding_config_custom():
 
     provider = Mem0MemoryProvider()
 
-    local_cfg = {
-        "embedding": {
-            "provider": "openai",
-            "model": "text-embedding-3-small",
-            "api_key": "test-key",
-        }
+    flat_cfg = {
+        "embedding_provider": "openai",
+        "embedding_model": "text-embedding-3-small",
+        "embedding_api_key": "test-key",
     }
 
-    config = provider._get_embedding_config(local_cfg)
+    config = provider._get_embedding_config(flat_cfg)
 
     assert config["provider"] == "openai"
     assert config["config"]["model"] == "text-embedding-3-small"
+    assert config["config"]["api_key"] == "test-key"
 
 
 # ---------------------------------------------------------------------------
@@ -317,15 +315,13 @@ def test_get_vector_store_config_custom():
 
     provider = Mem0MemoryProvider()
 
-    local_cfg = {
-        "vector_store": {
-            "provider": "chroma",
-            "path": "/custom/path",
-            "collection_name": "custom_collection",
-        }
+    flat_cfg = {
+        "vector_store_provider": "chroma",
+        "vector_store_path": "/custom/path",
+        "vector_store_collection": "custom_collection",
     }
 
-    config = provider._get_vector_store_config(local_cfg)
+    config = provider._get_vector_store_config(flat_cfg)
 
     assert config["provider"] == "chroma"
     assert config["config"]["path"] == "/custom/path"
@@ -341,12 +337,13 @@ def test_build_local_config():
     from plugins.memory.mem0 import Mem0MemoryProvider
 
     provider = Mem0MemoryProvider()
+    # Flat shape — exactly what the setup wizard's save_config writes.
     provider._config = {
-        "local": {
-            "llm_provider": "hermes",
-            "embedding": {"provider": "ollama", "model": "test-model"},
-            "vector_store": {"provider": "qdrant", "path": "/test/path"},
-        }
+        "llm_provider": "hermes",
+        "embedding_provider": "ollama",
+        "embedding_model": "test-model",
+        "vector_store_provider": "qdrant",
+        "vector_store_path": "/test/path",
     }
 
     with patch.object(provider, "_get_hermes_llm_config", return_value={"provider": "openai", "config": {}}):
@@ -357,7 +354,9 @@ def test_build_local_config():
         assert "vector_store" in config
         assert config["llm"]["provider"] == "openai"
         assert config["embedder"]["provider"] == "ollama"
+        assert config["embedder"]["config"]["model"] == "test-model"
         assert config["vector_store"]["provider"] == "qdrant"
+        assert config["vector_store"]["config"]["path"] == "/test/path"
 
 
 def test_get_client_local_mode():
@@ -512,39 +511,84 @@ def test_integration_local_mode_flow():
 
     provider = Mem0MemoryProvider()
 
-    # Mock configuration
+    # Flat configuration — the shape the setup wizard's save_config writes.
     config = {
         "mode": "local",
         "user_id": "test-user",
         "agent_id": "test-agent",
         "rerank": True,
-        "local": {
-            "llm_provider": "hermes",
-            "embedding": {
-                "provider": "ollama",
-                "model": "qwen3-embedding:4b",
-                "base_url": "http://localhost:11434",
-            },
-            "vector_store": {
-                "provider": "qdrant",
-                "path": "~/.hermes/qdrant",
-            },
-        },
+        "llm_provider": "hermes",
+        "embedding_provider": "ollama",
+        "embedding_model": "qwen3-embedding:4b",
+        "embedding_base_url": "http://localhost:11434",
+        "vector_store_provider": "qdrant",
+        "vector_store_path": "~/.hermes/qdrant",
     }
 
     with patch("plugins.memory.mem0._load_config", return_value=config):
         with patch("plugins.memory.mem0._check_local_runtime", return_value=(True, None)):
-            # Test is_available
-            assert provider.is_available() is True
+            with patch.object(provider, "_get_hermes_llm_config", return_value={"provider": "openai", "config": {}}):
+                # Test is_available
+                assert provider.is_available() is True
 
-            # Test initialize
-            provider.initialize("test-session")
-            assert provider._mode == "local"
-            assert provider._user_id == "test-user"
+                # Test initialize
+                provider.initialize("test-session")
+                assert provider._mode == "local"
+                assert provider._user_id == "test-user"
 
-            # Test _build_local_config
-            local_config = provider._build_local_config()
-            assert "llm" in local_config
-            assert "embedder" in local_config
-            assert "vector_store" in local_config
-            assert local_config["embedder"]["config"]["model"] == "qwen3-embedding:4b"
+                # Test _build_local_config
+                local_config = provider._build_local_config()
+                assert "llm" in local_config
+                assert "embedder" in local_config
+                assert "vector_store" in local_config
+                assert local_config["embedder"]["config"]["model"] == "qwen3-embedding:4b"
+
+
+def test_build_local_config_honors_wizard_flat_keys():
+    """Regression: values saved by the setup wizard (flat top-level keys) must
+    flow into the mem0 config, and the vector-store dimension must match the
+    embedding model actually used.
+
+    Before the fix, _build_local_config read a nested ``local`` block that the
+    wizard never writes, so user choices were silently dropped and the default
+    embedder (qwen3-embedding:4b, 2560 dims) was paired with a 1536-dim vector
+    store — a guaranteed qdrant dimension mismatch.
+    """
+    from plugins.memory.mem0 import Mem0MemoryProvider
+    from unittest.mock import patch
+
+    provider = Mem0MemoryProvider()
+    provider._config = {
+        "mode": "local",
+        "llm_provider": "hermes",
+        "embedding_provider": "ollama",
+        "embedding_model": "nomic-embed-text",
+        "embedding_base_url": "http://localhost:11434",
+        "vector_store_provider": "qdrant",
+        "vector_store_path": "/my/custom/qdrant",
+    }
+
+    with patch.object(provider, "_get_hermes_llm_config", return_value={"provider": "openai", "config": {}}):
+        cfg = provider._build_local_config()
+
+    # User-chosen values are honored, not silently replaced by defaults.
+    assert cfg["embedder"]["config"]["model"] == "nomic-embed-text"
+    assert cfg["vector_store"]["config"]["path"] == "/my/custom/qdrant"
+    # Dimension matches the model the embedder will actually use.
+    assert cfg["vector_store"]["config"]["embedding_model_dims"] == 768
+
+
+def test_build_local_config_default_dims_match_default_model():
+    """Regression: with no embedding config, the default embedder and the
+    vector-store dimension must agree (qwen3-embedding:4b -> 2560)."""
+    from plugins.memory.mem0 import Mem0MemoryProvider
+    from unittest.mock import patch
+
+    provider = Mem0MemoryProvider()
+    provider._config = {"mode": "local", "llm_provider": "hermes"}
+
+    with patch.object(provider, "_get_hermes_llm_config", return_value={"provider": "openai", "config": {}}):
+        cfg = provider._build_local_config()
+
+    assert cfg["embedder"]["config"]["model"] == "qwen3-embedding:4b"
+    assert cfg["vector_store"]["config"]["embedding_model_dims"] == 2560
