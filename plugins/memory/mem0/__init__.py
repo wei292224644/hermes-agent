@@ -26,6 +26,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 from agent.memory_provider import MemoryProvider
@@ -209,7 +210,7 @@ class Mem0MemoryProvider(MemoryProvider):
             {"key": "embedding_model", "description": "Embedding model", "default": "qwen3-embedding:4b", "when": {"mode": "local"}},
             {"key": "embedding_base_url", "description": "Ollama base URL", "default": "http://localhost:11434", "when": {"mode": "local", "embedding_provider": "ollama"}},
             {"key": "vector_store_provider", "description": "Vector store provider", "default": "qdrant", "choices": ["qdrant", "chroma", "faiss"], "when": {"mode": "local"}},
-            {"key": "vector_store_path", "description": "Vector store path", "default": "~/.hermes/qdrant", "when": {"mode": "local"}},
+            {"key": "vector_store_path", "description": "Vector store data directory (relative to $HERMES_HOME)", "default": "qdrant", "when": {"mode": "local"}},
             # Common
             {"key": "user_id", "description": "User identifier", "default": "hermes-user"},
             {"key": "agent_id", "description": "Agent identifier", "default": "hermes"},
@@ -338,17 +339,29 @@ class Mem0MemoryProvider(MemoryProvider):
         else:
             return {"provider": provider, "config": {}}
 
+    @staticmethod
+    def _resolve_data_path(name: str) -> str:
+        """Resolve a relative data directory name to an absolute path under $HERMES_HOME."""
+        from hermes_constants import get_hermes_home
+        return str(get_hermes_home() / name)
+
     def _get_vector_store_config(self, cfg: dict) -> dict:
-        """Get vector store config for mem0 local mode (reads flat config keys)."""
+        """Get vector store config for mem0 local mode (reads flat config keys).
+
+        ``vector_store_path`` is stored as a *relative* directory name (e.g.
+        ``"qdrant"``) and resolved to ``$HERMES_HOME/<name>`` here, matching
+        the convention used by other memory providers (retaindb, hindsight, …).
+        """
         provider = cfg.get("vector_store_provider", "qdrant")
         embedding_dims = self._get_embedding_dims(cfg)
         collection = cfg.get("vector_store_collection", "mem0")
+        data_path = self._resolve_data_path(cfg.get("vector_store_path", provider))
 
         if provider == "qdrant":
             return {
                 "provider": "qdrant",
                 "config": {
-                    "path": cfg.get("vector_store_path", "~/.hermes/qdrant"),
+                    "path": data_path,
                     "collection_name": collection,
                     "embedding_model_dims": embedding_dims,
                 },
@@ -357,7 +370,7 @@ class Mem0MemoryProvider(MemoryProvider):
             return {
                 "provider": "chroma",
                 "config": {
-                    "path": cfg.get("vector_store_path", "~/.hermes/chroma"),
+                    "path": data_path,
                     "collection_name": collection,
                 },
             }
@@ -365,7 +378,7 @@ class Mem0MemoryProvider(MemoryProvider):
             return {
                 "provider": "faiss",
                 "config": {
-                    "path": cfg.get("vector_store_path", "~/.hermes/faiss"),
+                    "path": data_path,
                 },
             }
         else:

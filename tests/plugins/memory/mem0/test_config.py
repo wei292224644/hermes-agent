@@ -302,10 +302,11 @@ def test_get_vector_store_config_default():
 
     provider = Mem0MemoryProvider()
 
-    config = provider._get_vector_store_config({})
+    with patch("hermes_constants.get_hermes_home", return_value=Path("/test/hermes")):
+        config = provider._get_vector_store_config({})
 
     assert config["provider"] == "qdrant"
-    assert config["config"]["path"] == "~/.hermes/qdrant"
+    assert config["config"]["path"] == "/test/hermes/qdrant"
     assert config["config"]["collection_name"] == "mem0"
 
 
