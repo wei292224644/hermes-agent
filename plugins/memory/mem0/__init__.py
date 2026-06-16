@@ -225,34 +225,21 @@ class Mem0MemoryProvider(MemoryProvider):
         return self._get_custom_llm_config(cfg)
 
     def _get_hermes_llm_config(self) -> dict:
-        """Get LLM config from hermes configuration (read-only)."""
-        from hermes_cli.config import load_config as _load_hermes_cfg
-        try:
-            _cfg = _load_hermes_cfg()
-        except Exception:
-            _cfg = {}
-        model_cfg = _cfg.get("model", {}) if isinstance(_cfg.get("model"), dict) else {}
-        provider = model_cfg.get("provider", "openai")
-        api_key = model_cfg.get("api_key", "")
-        base_url = model_cfg.get("base_url", "")
-        model = model_cfg.get("default", "")
+        """Route mem0's LLM through hermes's central ``call_llm``.
 
-        mem0_provider = self._map_hermes_provider_to_mem0(provider)
+        Earlier versions read ``model.api_key`` / ``model.base_url`` straight
+        off ``config.yaml``, but hermes does not store credentials there —
+        API keys live in the credential pool / auth store and base URLs under
+        ``custom_providers``. Reading the ``model`` block therefore yielded an
+        empty key and the wrong provider, forcing users to re-enter LLM
+        settings by hand.
 
-        # mem0ai 2.x uses provider-specific base_url field names
-        base_url_field = self._get_base_url_field(mem0_provider)
-
-        llm_config = {
-            "api_key": api_key,
-            "model": model,
-        }
-        if base_url:
-            llm_config[base_url_field] = base_url
-
-        return {
-            "provider": mem0_provider,
-            "config": llm_config,
-        }
+        Instead we select the ``"hermes"`` factory provider (see
+        ``plugins.memory.mem0.hermes_llm.HermesLLM``), which delegates each
+        generation to ``call_llm`` and inherits hermes's full provider
+        resolution. No credentials are duplicated here.
+        """
+        return {"provider": "hermes", "config": {}}
 
     def _get_base_url_field(self, mem0_provider: str) -> str:
         """Return the provider-specific base_url field name for mem0ai 2.x."""
@@ -264,17 +251,6 @@ class Mem0MemoryProvider(MemoryProvider):
             "deepseek": "deepseek_base_url",
         }
         return field_map.get(mem0_provider, "openai_base_url")
-
-    def _map_hermes_provider_to_mem0(self, hermes_provider: str) -> str:
-        """Map hermes provider name to mem0 provider name."""
-        provider_map = {
-            "openai": "openai",
-            "anthropic": "anthropic",
-            "ollama": "ollama",
-            "openrouter": "openai",
-            "deepseek": "openai",
-        }
-        return provider_map.get(hermes_provider, "openai")
 
     def _get_custom_llm_config(self, cfg: dict) -> dict:
         """Build a custom LLM config from flat ``llm_*`` keys."""
@@ -410,13 +386,43 @@ class Mem0MemoryProvider(MemoryProvider):
                 if self._mode == "local":
                     from mem0 import Memory
                     config = self._build_local_config()
-                    self._client = Memory.from_config(config)
+                    if config.get("llm", {}).get("provider") == "hermes":
+                        self._client = self._build_local_memory(Memory, config)
+                    else:
+                        self._client = Memory.from_config(config)
                 else:
                     from mem0 import MemoryClient
                     self._client = MemoryClient(api_key=self._api_key)
                 return self._client
             except ImportError:
                 raise RuntimeError("mem0 package not installed. Run: pip install mem0ai")
+
+    @staticmethod
+    def _build_local_memory(Memory, config: dict):
+        """Build a local ``Memory`` whose LLM is hermes's ``call_llm`` adapter.
+
+        mem0's ``Memory.from_config`` validates the LLM provider name against a
+        fixed allowlist and rejects ``"hermes"``. To inject our adapter we build
+        the ``MemoryConfig`` from the embedder/vector-store entries (validated
+        normally), then set the ``llm`` field via ``LlmConfig.model_construct``
+        — which skips that validation — pointing at the registered ``hermes``
+        factory provider.
+        """
+        from mem0.configs.base import MemoryConfig, LlmConfig
+        from plugins.memory.mem0.hermes_llm import register_hermes_llm
+
+        register_hermes_llm()
+
+        llm_entry = config.get("llm", {})
+        memory_config = MemoryConfig(
+            embedder=config["embedder"],
+            vector_store=config["vector_store"],
+        )
+        memory_config.llm = LlmConfig.model_construct(
+            provider="hermes",
+            config=llm_entry.get("config") or {},
+        )
+        return Memory(memory_config)
 
     def _is_breaker_open(self) -> bool:
         """Return True if the circuit breaker is tripped (too many failures)."""

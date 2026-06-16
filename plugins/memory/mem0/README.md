@@ -64,7 +64,7 @@ Config file: `$HERMES_HOME/mem0.json`
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `llm_provider` | `hermes` | LLM provider (use `hermes` to reuse hermes config) |
+| `llm_provider` | `hermes` | LLM provider. `hermes` (default) routes fact extraction through hermes's own model/credentials via `call_llm` — no API key needed here. Set a concrete provider (`openai`, `ollama`, …) only to override. |
 | `embedding_provider` | `ollama` | Embedding provider |
 | `embedding_model` | `qwen3-embedding:4b` | Embedding model |
 | `embedding_base_url` | `http://localhost:11434` | Ollama base URL |

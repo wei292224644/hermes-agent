@@ -190,41 +190,18 @@ def test_is_available_local_mode_unavailable():
             assert provider.is_available() is False
 
 
-def test_get_hermes_llm_config():
-    """Test _get_hermes_llm_config reads from hermes config."""
+def test_get_hermes_llm_config_routes_through_hermes_provider():
+    """_get_hermes_llm_config returns the 'hermes' factory provider so mem0
+    delegates to hermes's call_llm rather than building its own client from a
+    static (and usually empty) model.api_key/base_url block."""
     from plugins.memory.mem0 import Mem0MemoryProvider
 
     provider = Mem0MemoryProvider()
 
-    hermes_cfg = {
-        "model": {
-            "provider": "openai",
-            "api_key": "test-key",
-            "base_url": "https://api.openai.com/v1",
-            "default": "gpt-4",
-        }
-    }
-    with patch("hermes_cli.config.load_config", return_value=hermes_cfg):
-        config = provider._get_hermes_llm_config()
+    config = provider._get_hermes_llm_config()
 
-        assert config["provider"] == "openai"
-        assert config["config"]["api_key"] == "test-key"
-        assert config["config"]["openai_base_url"] == "https://api.openai.com/v1"
-        assert config["config"]["model"] == "gpt-4"
-
-
-def test_map_hermes_provider_to_mem0():
-    """Test _map_hermes_provider_to_mem0 maps correctly."""
-    from plugins.memory.mem0 import Mem0MemoryProvider
-
-    provider = Mem0MemoryProvider()
-
-    assert provider._map_hermes_provider_to_mem0("openai") == "openai"
-    assert provider._map_hermes_provider_to_mem0("anthropic") == "anthropic"
-    assert provider._map_hermes_provider_to_mem0("ollama") == "ollama"
-    assert provider._map_hermes_provider_to_mem0("openrouter") == "openai"
-    assert provider._map_hermes_provider_to_mem0("deepseek") == "openai"
-    assert provider._map_hermes_provider_to_mem0("unknown") == "openai"
+    assert config["provider"] == "hermes"
+    assert config["config"] == {}
 
 
 def test_get_llm_config_hermes():
@@ -233,10 +210,9 @@ def test_get_llm_config_hermes():
 
     provider = Mem0MemoryProvider()
 
-    with patch.object(provider, "_get_hermes_llm_config", return_value={"provider": "openai", "config": {}}):
-        config = provider._get_llm_config({"llm_provider": "hermes"})
+    config = provider._get_llm_config({"llm_provider": "hermes"})
 
-        assert config["provider"] == "openai"
+    assert config["provider"] == "hermes"
 
 
 def test_get_llm_config_custom():
@@ -382,6 +358,60 @@ def test_get_client_local_mode():
 
             assert client is not None
             mock_memory.from_config.assert_called_once()
+
+
+def test_get_client_local_mode_hermes_provider():
+    """When the local-mode LLM provider is 'hermes', _get_client must register
+    the HermesLLM factory entry and build Memory via a MemoryConfig whose llm
+    field is set with model_construct (bypassing mem0's provider validation),
+    NOT via from_config (which would reject the unknown 'hermes' provider)."""
+    import sys
+    import plugins.memory.mem0.hermes_llm  # noqa: F401 — make patch target resolvable
+    from plugins.memory.mem0 import Mem0MemoryProvider
+    from unittest.mock import MagicMock
+
+    provider = Mem0MemoryProvider()
+    provider._mode = "local"
+    provider._config = {"llm_provider": "hermes"}
+
+    mock_memory = MagicMock()
+    fake_mem0 = MagicMock()
+    fake_mem0.Memory = mock_memory
+
+    fake_configs = MagicMock()
+    built_memory_config = MagicMock()
+    fake_configs.MemoryConfig.return_value = built_memory_config
+    fake_configs.LlmConfig.model_construct.return_value = "HERMES_LLM_CONFIG"
+
+    registered = []
+
+    local_cfg = {
+        "llm": {"provider": "hermes", "config": {}},
+        "embedder": {"provider": "ollama", "config": {}},
+        "vector_store": {"provider": "qdrant", "config": {}},
+    }
+
+    with patch.dict(sys.modules, {"mem0": fake_mem0, "mem0.configs.base": fake_configs}):
+        with patch("plugins.memory.mem0.hermes_llm.register_hermes_llm",
+                   side_effect=lambda: registered.append(True)):
+            with patch.object(provider, "_build_local_config", return_value=local_cfg):
+                client = provider._get_client()
+
+    # Registered the hermes factory entry.
+    assert registered == [True]
+    # Built via Memory(config), not from_config.
+    mock_memory.from_config.assert_not_called()
+    mock_memory.assert_called_once_with(built_memory_config)
+    # MemoryConfig built from embedder + vector_store, llm excluded from kwargs.
+    _, mc_kwargs = fake_configs.MemoryConfig.call_args
+    assert "llm" not in mc_kwargs
+    assert mc_kwargs["embedder"] == local_cfg["embedder"]
+    assert mc_kwargs["vector_store"] == local_cfg["vector_store"]
+    # llm overridden with a model_construct'd hermes config.
+    fake_configs.LlmConfig.model_construct.assert_called_once_with(
+        provider="hermes", config={})
+    assert built_memory_config.llm == "HERMES_LLM_CONFIG"
+    assert client is built_memory_config or client is mock_memory.return_value
 
 
 def test_get_client_cloud_mode():
