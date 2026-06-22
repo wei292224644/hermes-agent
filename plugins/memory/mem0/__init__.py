@@ -1,13 +1,15 @@
 """Mem0 memory plugin — MemoryProvider interface.
 
 Server-side LLM fact extraction, semantic search with reranking, and
-automatic deduplication via the Mem0 Platform API.
+automatic deduplication via the Mem0 Platform API, a self-hosted instance,
+or a fully local in-process backend.
 
 Original PR #2933 by kartik-mem0, adapted to MemoryProvider ABC.
 
 Config via environment variables:
   MEM0_MODE          — Backend mode: "cloud" (default) or "local"
-  MEM0_API_KEY       — Mem0 Platform API key (required for cloud mode)
+  MEM0_API_KEY       — Mem0 API key (required for cloud mode)
+  MEM0_HOST          — Self-hosted Mem0 URL (default: https://api.mem0.ai)
   MEM0_USER_ID       — User identifier (default: hermes-user)
   MEM0_AGENT_ID      — Agent identifier (default: hermes)
 
@@ -44,6 +46,7 @@ _BREAKER_COOLDOWN_SECS = 120
 # Config
 # ---------------------------------------------------------------------------
 
+
 def _load_config() -> dict:
     """Load config from env vars, with $HERMES_HOME/mem0.json overrides.
 
@@ -61,6 +64,7 @@ def _load_config() -> dict:
     config = {
         "mode": os.environ.get("MEM0_MODE", "cloud"),
         "api_key": os.environ.get("MEM0_API_KEY", ""),
+        "host": os.environ.get("MEM0_HOST", ""),
         "user_id": os.environ.get("MEM0_USER_ID", "hermes-user"),
         "agent_id": os.environ.get("MEM0_AGENT_ID", "hermes"),
         "rerank": True,
@@ -149,13 +153,19 @@ CONCLUDE_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 class Mem0MemoryProvider(MemoryProvider):
-    """Mem0 Platform memory with server-side extraction and semantic search."""
+    """Mem0 memory with server-side extraction and semantic search.
+
+    Supports Mem0 Cloud (api.mem0.ai), self-hosted instances via the ``host``
+    config key or ``MEM0_HOST`` env var, and a fully local in-process backend.
+    """
 
     def __init__(self):
         self._config = None
         self._client = None
         self._client_lock = threading.Lock()
         self._api_key = ""
+        self._host = ""
+        self._mode = "cloud"
         self._user_id = "hermes-user"
         self._agent_id = "hermes"
         self._rerank = True
@@ -179,8 +189,9 @@ class Mem0MemoryProvider(MemoryProvider):
             if mode == "local":
                 available, _ = _check_local_runtime()
                 return available
-            else:
-                return bool(cfg.get("api_key"))
+
+            # Cloud / self-hosted: available when an API key or host is configured.
+            return bool(cfg.get("api_key")) or bool(cfg.get("host"))
         except Exception:
             return False
 
@@ -202,8 +213,9 @@ class Mem0MemoryProvider(MemoryProvider):
     def get_config_schema(self):
         return [
             {"key": "mode", "description": "Connection mode", "default": "cloud", "choices": ["cloud", "local"]},
-            # Cloud mode
-            {"key": "api_key", "description": "Mem0 Platform API key", "secret": True, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai", "when": {"mode": "cloud"}},
+            # Cloud / self-hosted
+            {"key": "api_key", "description": "Mem0 API key (cloud or self-hosted)", "secret": True, "required": True, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai", "when": {"mode": "cloud"}},
+            {"key": "host", "description": "Self-hosted Mem0 URL (e.g. http://localhost:24220)", "default": "", "env_var": "MEM0_HOST", "when": {"mode": "cloud"}},
             # Local mode
             {"key": "llm_provider", "description": "LLM provider (use 'hermes' to reuse hermes config)", "default": "hermes", "when": {"mode": "local"}},
             {"key": "embedding_provider", "description": "Embedding provider", "default": "ollama", "choices": ["ollama", "openai"], "when": {"mode": "local"}},
@@ -392,7 +404,14 @@ class Mem0MemoryProvider(MemoryProvider):
                         self._client = Memory.from_config(config)
                 else:
                     from mem0 import MemoryClient
-                    self._client = MemoryClient(api_key=self._api_key)
+                    kwargs = {}
+                    if self._host:
+                        kwargs["host"] = self._host
+                    if self._api_key:
+                        kwargs["api_key"] = self._api_key
+                    elif not self._host:
+                        raise ValueError("Mem0: either api_key or host is required")
+                    self._client = MemoryClient(**kwargs)
                 return self._client
             except ImportError:
                 raise RuntimeError("mem0 package not installed. Run: pip install mem0ai")
@@ -451,6 +470,7 @@ class Mem0MemoryProvider(MemoryProvider):
         self._config = _load_config()
         self._mode = self._config.get("mode", "cloud")
         self._api_key = self._config.get("api_key", "")
+        self._host = self._config.get("host", "")
         # Prefer gateway-provided user_id for per-user memory scoping;
         # fall back to config/env default for CLI (single-user) sessions.
         self._user_id = kwargs.get("user_id") or self._config.get("user_id", "hermes-user")
@@ -475,8 +495,9 @@ class Mem0MemoryProvider(MemoryProvider):
         return []
 
     def system_prompt_block(self) -> str:
+        target = self._host or self._mode or "cloud"
         return (
-            "# Mem0 Memory\n"
+            f"# Mem0 Memory ({target})\n"
             f"Active. User: {self._user_id}.\n"
             "Use mem0_search to find memories, mem0_conclude to store facts, "
             "mem0_profile for a full overview."

@@ -2,12 +2,13 @@
 
 Server-side LLM fact extraction with semantic search, reranking, and automatic deduplication.
 
+Supports [Mem0 Cloud](https://app.mem0.ai), self-hosted instances, and a fully
+local in-process mode.
+
 ## Requirements
 
 - `pip install mem0ai`
-
-### Cloud Mode
-- Mem0 API key from [app.mem0.ai](https://app.mem0.ai)
+- Mem0 Cloud API key **or** a self-hosted Mem0 server
 
 ### Local Mode
 - Ollama running locally
@@ -15,19 +16,29 @@ Server-side LLM fact extraction with semantic search, reranking, and automatic d
 
 ## Setup
 
+### Cloud
+
 ```bash
 hermes memory setup    # select "mem0"
 ```
 
 Or manually:
 
-### Cloud Mode
 ```bash
 hermes config set memory.provider mem0
 echo "MEM0_API_KEY=your-key" >> ~/.hermes/.env
 ```
 
+### Self-Hosted
+
+```bash
+hermes config set memory.provider mem0
+echo "MEM0_HOST=http://your-mem0-server:24220" >> ~/.hermes/.env
+echo "MEM0_API_KEY=your-api-key" >> ~/.hermes/.env   # if auth is enabled
+```
+
 ### Local Mode
+
 ```bash
 hermes config set memory.provider mem0
 cat > ~/.hermes/mem0.json << EOF
@@ -50,7 +61,9 @@ Config file: `$HERMES_HOME/mem0.json`
 | Key | Default | Description |
 |-----|---------|-------------|
 | `mode` | `cloud` | Connection mode: `cloud` or `local` |
-| `user_id` | `hermes-user` | User identifier on Mem0 |
+| `api_key` | — | API key (required for cloud; optional for self-hosted without auth) |
+| `host` | `https://api.mem0.ai` | Self-hosted Mem0 URL. When set, overrides the cloud endpoint. |
+| `user_id` | `hermes-user` | User identifier |
 | `agent_id` | `hermes` | Agent identifier |
 | `rerank` | `true` | Enable reranking for recall |
 
